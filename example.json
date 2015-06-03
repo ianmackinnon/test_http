@@ -1,0 +1,17 @@
+{
+  "tests": [
+    {
+      "group": "Example",
+      "tests": [
+        {
+          "url": "http://www.example.com",
+          "name": "root",
+          "mime": "text/html"
+        },
+
+        "http://www.example.net"
+
+      ]
+    }
+  ]
+}
