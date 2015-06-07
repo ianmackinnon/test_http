@@ -174,6 +174,8 @@ class Http(object):
         "php": "assert_php_ok",
 
         "jsonCount": "check_json_count",
+        "contains": "check_contains",
+        "containsNot": "check_contains_not",
     }
 
     def assert_json_ok(self, content):
@@ -211,6 +213,14 @@ class Http(object):
                 self.fail("Path does not exist: \"%s\"" % path)
 
         self.assertEqual(len(cursor), count)
+
+    def check_contains(self, content, term):
+        if not term in content:
+            self.fail("Term \"%s\" not found in content." % term)
+
+    def check_contains_not(self, content, term):
+        if term in content:
+            self.fail("Term \"%s\" found in content." % term)
 
 
     # Other

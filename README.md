@@ -58,6 +58,27 @@ A check can be a name, or an object containing the check name and some parameter
 Including the "json" check will automatically set the mime type to "application/json" if it has not been set explicitly already.
 
 
+#### jsonCount
+
+Count a JSON list at a given path.
+
+Variables *name*, *path*, *count*
+
+
+#### contains
+
+Ensure the raw content contains the search term.
+
+Variables *name*, *term*
+
+
+#### containsNot
+
+Ensure the raw content does not contain the search term.
+
+Variables *name*, *term*
+
+
 ## Test
 
 In one shell:
