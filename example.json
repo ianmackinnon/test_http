@@ -6,6 +6,9 @@
         {
           "url": "http://www.example.com",
           "name": "root",
+          "header": {
+            "Accept": "text/html"
+          },
           "mime": "text/html",
           "checks": [
             {

@@ -29,6 +29,9 @@ Tests themselves may be a simple URL, or an object containing separate parameter
     {
       "url": "http://www.example.com",
       "name": "root",
+      "header": {
+        "Accept": "text/html"
+      },
       "mime": "text/html"
     }
 

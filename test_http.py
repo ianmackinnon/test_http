@@ -89,8 +89,9 @@ class Http(object):
 
         return data
 
-    def http_request(self, path, cookie=None, mime=None, checks=None, status=200):
-        headers = {}
+    def http_request(self, path, cookie=None, mime=None, headers=None, checks=None, status=200):
+        if headers is None:
+            headers = {}
         if cookie:
             headers["Cookie"] = cookie
         response, content = self.get_http_old(path, headers)
@@ -261,9 +262,9 @@ class HttpTest(unittest.TestCase, Http):
 
         
 
-def http_helper(url, mime=None, checks=None):
+def http_helper(url, mime=None, headers=None, checks=None):
     def f(self):
-        html = self.http_request(url, mime=mime, checks=checks)
+        html = self.http_request(url, mime=mime, headers=headers, checks=checks)
     return f
 
 
@@ -283,6 +284,7 @@ if tests:
     for group in tests:
         group_name = str(group.get("group", None))
         group_tests = group.get("tests", None)
+        group_headers = group.get("header", None) or {}
         group_checks = group.get("checks", None) or default_checks[:]
         if not (group_name and group_tests):
             continue
@@ -294,6 +296,7 @@ if tests:
         for test in group_tests:
             resource_name = None
             resource_mime = None
+            resource_headers = group_headers.copy()
             resource_checks = group_checks[:]
             if isinstance(test, basestring):
                 url = test
@@ -303,6 +306,8 @@ if tests:
                 resource_mime = test.get("mime", None)
                 if "checks" in test and test["checks"]:
                     resource_checks = test["checks"]
+                if "header" in test and test["header"]:
+                    resource_headers = test["header"]
 
             resource_name = resource_name or ""
 
@@ -314,7 +319,7 @@ if tests:
             if resource_name:
                 test_name += "_%s" % resource_name
 
-            func = http_helper(url, mime=resource_mime, checks=resource_checks)
+            func = http_helper(url, mime=resource_mime, headers=resource_headers, checks=resource_checks)
             func.func_name = test_name
             class_dict[test_name] = func
 
