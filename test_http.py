@@ -68,6 +68,8 @@ class Http(object):
             title = None
 
         log.info(u"\n%-64s  %s" % (url, title or u""))
+        content = content.decode("utf-8")
+            
         return response, content
 
     def get_json_data(self, path, cookie=None):
