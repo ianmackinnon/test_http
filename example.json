@@ -12,6 +12,24 @@
         "http://www.example.net"
 
       ]
+    },
+    {
+      "group": "LocalJson",
+      "tests": [
+
+        {
+          "url": "http://localhost:8088/json-count-year.json",
+          "checks": [
+            "json",
+            {
+              "name": "jsonCount",
+              "path": ".year",
+              "count": 2
+            }
+          ]
+        }
+        
+      ]
     }
   ]
 }

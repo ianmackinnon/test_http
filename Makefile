@@ -23,3 +23,6 @@ uninstall :
 
 test :
 	HTTP_TEST_CONF=example.json ./test_http.py
+
+serve :
+	cd test_data && python -m SimpleHTTPServer 8088

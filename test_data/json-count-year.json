@@ -1,0 +1,45 @@
+{
+  "source": [
+    {
+      "name": "France", 
+      "value": 33290326015
+    }, 
+    {
+      "name": "Germany", 
+      "value": 15962794551
+    }, 
+    {
+      "name": "United Kingdom", 
+      "value": 14898300549
+    }
+  ], 
+  "destination": [
+    {
+      "name": "Saudi Arabia", 
+      "value": 11617985325
+    }, 
+    {
+      "name": "United States", 
+      "value": 11187682351
+    }, 
+    {
+      "name": "United Kingdom", 
+      "value": 9046403860
+    }, 
+    {
+      "name": "French Polynesia", 
+      "value": 419
+    }
+  ], 
+  "unit": "\u20ac", 
+  "year": [
+    {
+      "name": 2013, 
+      "value": 36483998304
+    }, 
+    {
+      "name": 2011, 
+      "value": 37522546184
+    }
+  ]
+}
