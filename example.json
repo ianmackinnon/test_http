@@ -35,9 +35,19 @@
           "checks": [
             "json",
             {
+              "name": "jsonValue",
+              "path": ".total",
+              "gte": 40
+            },
+            {
+              "name": "jsonValue",
+              "path": ".unit",
+              "equal": "\u20ac"
+            },
+            {
               "name": "jsonCount",
               "path": ".year",
-              "count": 2
+              "equal": 2
             }
           ]
         }

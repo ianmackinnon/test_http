@@ -72,23 +72,6 @@ class Http(object):
             
         return response, content
 
-    def get_json_data(self, path, cookie=None):
-        headers = {
-                "Accept": "application/json",
-                }
-        if cookie:
-            headers["Cookie"] = cookie
-        response, content = self.get_http_old(path, headers)
-        
-        self.assertEqual(response.status, 200, msg=path)
-        self.assertNotEqual(response["content-length"], 0)
-        self.assertEqual(response["content-type"],
-                         'application/json; charset=UTF-8')
-        
-        data = json.loads(content)
-
-        return data
-
     def http_request(self, path, cookie=None, mime=None, headers=None, checks=None, status=200):
         if headers is None:
             headers = {}
@@ -128,10 +111,13 @@ class Http(object):
             mime = mime.split(";")[0] or None
         if response_mime:
             response_mime = response_mime.split(";")[0] or None
-        
+
         self.assertEqual(response.status, status, path)
-        self.assertEqual(response_mime, mime)
-        self.assertNotEqual(response["content-length"], 0)
+        self.assertEqual(response_mime, mime, path)
+        if "content-length" in response:
+            self.assertNotEqual(response["content-length"], 0, path)
+        else:
+            log.warning("Required header missing: \"content-length\"")
 
         for f_name, f_kwargs in check_functions:
             getattr(self, f_name)(content, **f_kwargs)
@@ -172,36 +158,37 @@ class Http(object):
         }
     
     checks = {
-        "json": "assert_json_ok",
-        "mako": "assert_mako_ok",
-        "php": "assert_php_ok",
+        "json": "check_json_ok",
+        "mako": "check_mako_ok",
+        "php": "check_php_ok",
 
+        "jsonValue": "check_json_value",
         "jsonCount": "check_json_count",
         "contains": "check_contains",
         "containsNot": "check_contains_not",
     }
 
-    def assert_json_ok(self, content):
+    def check_json_ok(self, content):
         try:
             json.loads(content)
         except ValueError as e:
             self.fail("JSON decode error: %s." % unicode(e))
 
-    def assert_mako_ok(self, html):
+    def check_mako_ok(self, html):
         if "Mako Runtime Error" in html:
             with open(self.error_html, "w") as html_file:
                 html_file.write(html)
                 html_file.close()
             self.fail("Mako template error. See '%s'." % self.error_html)
 
-    def assert_php_ok(self, html):
+    def check_php_ok(self, html):
         if ".php</b> on line <b>" in html:
             with open(self.error_html, "w") as html_file:
                 html_file.write(html)
                 html_file.close()
             self.fail("PHP error. See '%s'." % self.error_html)
 
-    def check_json_count(self, content, count, path):
+    def check_json_path(self, content, path):
         try:
             data = json.loads(content)
         except ValueError as e:
@@ -213,9 +200,29 @@ class Http(object):
             try:
                 cursor = cursor[key]
             except KeyError as e:
-                self.fail("Path does not exist: \"%s\"" % path)
+                self.fail(u"Path does not exist: \"%s\"" % path)
 
-        self.assertEqual(len(cursor), count)
+        log.debug(u"JSON path: \"%s\"; value: \"%s\"." % (path, cursor))
+
+        return cursor
+
+    def check_json_value(self, content, path, **kwargs):
+        value = self.check_json_path(content, path)
+        if "equal" in kwargs:
+            self.assertEqual(value, kwargs["equal"])
+        if "gte" in kwargs:
+            self.assertGreaterEqual(value, kwargs["gte"])
+        if "lte" in kwargs:
+            self.assertLessEqual(value, kwargs["lte"])
+
+    def check_json_count(self, content, path, **kwargs):
+        value = len(self.check_json_path(content, path))
+        if "equal" in kwargs:
+            self.assertEqual(value, kwargs["equal"])
+        if "gte" in kwargs:
+            self.assertGreaterEqual(value, kwargs["gte"])
+        if "lte" in kwargs:
+            self.assertLessEqual(value, kwargs["lte"])
 
     def check_contains(self, content, term):
         if not term in content:
