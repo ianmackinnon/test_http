@@ -313,6 +313,24 @@ def update_params(*args):
     return updated
 
 
+
+def env_params(params, env=None):
+    updated = copy.deepcopy(params)
+    if env:
+        for key, value in params.items():
+            if isinstance(value, basestring) and value.startswith("$"):
+                env_key = value[1:]
+                value = os.getenv(env_key, None)
+                if value is not None:
+                    updated[key] = value
+                elif env_key in env:
+                    updated[key] = env[env_key]
+                        
+    return updated
+
+
+    
+
 default_params = {
     "scheme": "http",
     "checks": [
@@ -329,6 +347,7 @@ if not conf_path:
 
 
 counter = 0
+env = conf.get("env", None)
 tests = conf.get("tests", None)
 if tests:
     for group in tests:
@@ -350,6 +369,7 @@ if tests:
                     "url": test
                 }
             resource_params = update_params(group_params, test)
+            resource_params = env_params(resource_params, env)
 
             url = resource_params.get("url", None)
             if url is None:

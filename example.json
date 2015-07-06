@@ -1,8 +1,12 @@
 {
+  "env": {
+    "EXAMPLE": "www.example.com"
+  },
   "tests": [
     {
       "group": "Example",
       "tests": [
+        
         {
           "url": "http://www.example.com",
           "name": "root",
@@ -27,13 +31,14 @@
       ]
     },
     {
-      "group": "Example2",
-      "host": "www.example.com",
+      "group": "ExampleEnv",
+      "host": "$EXAMPLE",
       "header": {
         "Accept": "text/html"
       },
       "mime": "text/html",
       "tests": [
+        
         {
           "name": "root",
           "path": "/",
@@ -48,6 +53,7 @@
             }
           ]
         }
+        
       ]
     },
     {
