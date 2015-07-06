@@ -27,6 +27,30 @@
       ]
     },
     {
+      "group": "Example2",
+      "host": "www.example.com",
+      "header": {
+        "Accept": "text/html"
+      },
+      "mime": "text/html",
+      "tests": [
+        {
+          "name": "root",
+          "path": "/",
+          "checks": [
+            {
+              "name": "containsNot",
+              "term": "Lorem ipsum"
+            },
+            {
+              "name": "contains",
+              "term": "<h1>Example Domain</h1>"
+            }
+          ]
+        }
+      ]
+    },
+    {
       "group": "LocalJson",
       "tests": [
 

@@ -3,10 +3,12 @@
 
 import os
 import sys
+import copy
 import json
 import random
 import logging
 import unittest
+from urllib import urlencode
 from optparse import OptionParser
 from urlparse import urlparse, urlunparse
 
@@ -269,10 +271,54 @@ class HttpTest(unittest.TestCase, Http):
 
         
 
-def http_helper(url, mime=None, headers=None, checks=None):
+def http_helper(url, params):
+    mime = params.get("mime", None)
+    headers = params.get("header", None)
+    checks = params.get("checks", None)
     def f(self):
         html = self.http_request(url, mime=mime, headers=headers, checks=checks)
     return f
+
+
+
+PARAMS = {
+    "url": {},
+
+    "scheme": {},
+    "host": {},
+    "path": {},
+    "query": {},
+
+    "mime": {},
+    "headers": {},
+    "checks": {},
+}
+
+
+def update_params(*args):
+    updated = {}
+    for key in PARAMS:
+        append = None
+        if key.endswith("Append"):
+            key = key[-6:]
+            if key in PARAMS:
+                raise Exception("Duplicate Key %s" % key)
+            append = True
+        for params in args:
+            if key in params:
+                if append and updated[key]:
+                    updated[key] += copy.deepcopy(params[key])
+                else:
+                    updated[key] = copy.deepcopy(params[key])
+    return updated
+
+
+default_params = {
+    "scheme": "http",
+    "checks": [
+        "mako"
+    ]
+}
 
 
 
@@ -281,52 +327,61 @@ if not conf_path:
     sys.exit(1)
 
 
-default_checks = [
-    "mako"
-]
-    
+
 counter = 0
 tests = conf.get("tests", None)
 if tests:
     for group in tests:
-        group_name = str(group.get("group", None))
+        group_params = update_params(default_params, group)
+        group_name = group.get("group", None)
         group_tests = group.get("tests", None)
-        group_headers = group.get("header", None) or {}
-        group_checks = group.get("checks", None) or default_checks[:]
+
         if not (group_name and group_tests):
             continue
 
-        class_name = "Test%s" % group_name
-
+        class_name = "Test%s" % str(group_name)
         class_dict = {}
 
+        test_names = set()
+
         for test in group_tests:
-            resource_name = None
-            resource_mime = None
-            resource_headers = group_headers.copy()
-            resource_checks = group_checks[:]
             if isinstance(test, basestring):
-                url = test
-            else:
-                url = test.get("url", None)
-                resource_name = str(test.get("name", ""))
-                resource_mime = test.get("mime", None)
-                if "checks" in test and test["checks"]:
-                    resource_checks = test["checks"]
-                if "header" in test and test["header"]:
-                    resource_headers = test["header"]
+                test = {
+                    "url": test
+                }
+            resource_params = update_params(group_params, test)
 
-            resource_name = resource_name or ""
-
-            if not url:
+            url = resource_params.get("url", None)
+            if url is None:
+                query = resource_params.get("query", "")
+                if query:
+                    query = urlencode(query, True)
+                try:
+                    url = urlunparse((
+                        resource_params["scheme"],
+                        resource_params["host"],
+                        resource_params.get("path", ""),
+                        "",
+                        query,
+                        "",
+                        ))
+                except ValueError as e:
+                    url = None
+            if url is None:
+                log.warning("Parameter `url` missing from test and could not be constructed from `scheme` and `host`.")
                 continue
 
             counter += 1
-            test_name = "test_%04d" % counter
-            if resource_name:
-                test_name += "_%s" % resource_name
+            name = resource_params.get("name", None)
+            if name:
+                if name in test_names:
+                    log.warning("Duplicate test name '%s'" % name)
+                test_names.add(name)
+                test_name = "test_%s" % name
+            else:
+                test_name = "test_%04d" % counter
 
-            func = http_helper(url, mime=resource_mime, headers=resource_headers, checks=resource_checks)
+            func = http_helper(url, resource_params)
             func.func_name = test_name
             class_dict[test_name] = func
 
