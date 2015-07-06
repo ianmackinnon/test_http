@@ -5,15 +5,14 @@ import os
 import sys
 import copy
 import json
+import stat
 import random
 import logging
 import unittest
+import requests
 from urllib import urlencode
 from optparse import OptionParser
 from urlparse import urlparse, urlunparse
-
-import httplib2
-import lxml.html
 
 
 
@@ -22,67 +21,85 @@ log.addHandler(logging.StreamHandler())
 
 
 
-conf_path_key = "HTTP_TEST_CONF"
-conf_path = os.getenv(conf_path_key, None)
-conf = json.load(open(conf_path))
+DEFAULT_METHOD = 'GET'
+DEFAULT_MIME = 'text/html'
+DEFAULT_STATUS = 200
+CONF_PATH_KEY = "HTTP_TEST_CONF"
 
 
+
+conf_path = os.getenv(CONF_PATH_KEY, None)
+if conf_path is None:
+    sys.stderr.write(u"Environment variable %s must be set to the path of a JSON configuration file.\n" % CONF_PATH_KEY)
+    sys.exit(1)
+
+conf_dir = os.path.dirname(conf_path)
+try:
+    conf_handle=open(conf_path)
+except IOError as e:
+    sys.stderr.write(u"Could not open configuration file %s.\n" % conf_path)
+    sys.stderr.write(unicode(e) + "\n")
+    sys.exit(1)
+
+try:
+    conf = json.load(conf_handle)
+except ValueError as e:
+    sys.stderr.write(u"configuration file %s is not valid JSON.\n" % conf_path)
+    sys.stderr.write(unicode(e) + "\n")
+    sys.exit(1)
+
+    
 
 class Http(object):
     error_html = "/tmp/test_http_error.html"
 
-    @classmethod
-    def make_http(cls):
-        if hasattr(cls, "http"):
-            return
-        cls.http = httplib2.Http(
-            cache=None,
-            disable_ssl_certificate_validation=True,
-        )
-        cls.http.follow_redirects = False
-
-    @classmethod
-    def get_cookies(cls, url):
-        cls.make_http()
-        response, content = cls.http.request(url)
-        return response["set-cookie"]
-        
     def __init__(self):
-        self.make_http()
+        self.session = requests.Session()
+        self.session.verify = False,
 
-    def http_request_title(self, content):
-        try:
-            page = lxml.html.document_fromstring(content)
-        except Exception as e:
-            print "", e
-            return
-            
-        title = page.find(".//title")
-        if title is not None:
-            return title.text
-
-    def get_http_old(self, path, headers):
-        url = path
-        response, content = self.http.request(url, headers=headers)
-        if response.status == 200:
-            title = self.http_request_title(content)
+    def http_request(
+            self,
+            uri,
+            identity=None,
+            headers=None,
+            method=None,
+            cookie=None,
+            status=None,
+            mime=None, 
+            checks=None,
+    ):
+        if identity:
+            session = self.identities[identity]
         else:
-            title = None
+            session = self.session
 
-        log.info(u"\n%-64s  %s" % (url, title or u""))
-        content = content.decode("utf-8")
-            
-        return response, content
-
-    def http_request(self, path, cookie=None, mime=None, headers=None, checks=None, status=200):
         if headers is None:
             headers = {}
-        if cookie:
-            headers["Cookie"] = cookie
-        response, content = self.get_http_old(path, headers)
+#        if cookie:
+#            headers["Cookie"] = cookie
+
+        if method is None:
+            method = DEFAULT_METHOD
+
+        data = None
+        if method in ("POST", "PUT", "DELETE") and self.xsrf:
+            name = self.xsrf["cookie"]
+            query = self.xsrf["query"]
+            for cookie in session.cookies:
+                if cookie.name == name and cookie.domain in uri:
+                    data = {}
+                    data[query] = cookie.value
+                    break
+
+        response = session.request(
+            method,
+            uri,
+            headers=headers,
+            data=data,
+            allow_redirects=False,
+        )
 
         # Set mime by check if mime is null
-
         automime = None
         check_functions = []
         for check in checks:
@@ -106,53 +123,29 @@ class Http(object):
                     automime = check_automime
 
         if mime is None:
-            mime = automime or 'text/html'
-
-        response_mime = response["content-type"] or None
+            mime = automime or DEFAULT_MIME
         if mime:
             mime = mime.split(";")[0] or None
+
+        response_mime = response.headers["content-type"] or None
         if response_mime:
             response_mime = response_mime.split(";")[0] or None
 
-        self.assertEqual(response.status, status, path)
-        self.assertEqual(response_mime, mime, path)
-        if "content-length" in response:
-            self.assertNotEqual(response["content-length"], 0, path)
+        if status is None:
+            status = DEFAULT_STATUS
+
+        self.assertEqual(response.status_code, status, uri)
+        self.assertEqual(response_mime, mime, uri)
+        if "content-length" in response.headers:
+            self.assertNotEqual(response.headers["content-length"], 0, uri)
         else:
             log.warning("Required header missing: \"content-length\"")
 
         for f_name, f_kwargs in check_functions:
-            getattr(self, f_name)(content, **f_kwargs)
+            getattr(self, f_name)(response.text, **f_kwargs)
         
-        return content
+        return response.text
         
-    def http_request_not_found(self, path, cookie=None):
-        headers = {}
-        if cookie:
-            headers["Cookie"] = cookie
-        response, content = self.get_http_old(path, headers)
-        
-        self.assertEqual(response.status, 404, msg=path)
-
-        return content
-
-    def http_request_not_authenticated(self, path, cookie=None):
-        headers = {}
-        if cookie:
-            headers["Cookie"] = cookie
-        response, content = self.get_http_old(path, headers)
-        
-        self.assertEqual(response.status, 302, msg=path)
-        self.assertEqual(response["location"][:11], "/auth/login")
-
-    def http_request_not_authorised(self, path, cookie=None):
-        headers = {}
-        if cookie:
-            headers["Cookie"] = cookie
-        response, content = self.get_http_old(path, headers)
-        
-        self.assertEqual(response.status, 403, msg=path)
-
     # Checks
 
     automime = {
@@ -272,11 +265,68 @@ class HttpTest(unittest.TestCase, Http):
         
 
 def http_helper(url, params):
+    identity = params.get("identity", None)
+
+    headers = params.get("headers", None)
+    method = params.get("method", None)
+
+    status = params.get("status", None)
     mime = params.get("mime", None)
-    headers = params.get("header", None)
     checks = params.get("checks", None)
+
     def f(self):
-        html = self.http_request(url, mime=mime, headers=headers, checks=checks)
+        html = self.http_request(
+            url,
+            identity=identity,
+            headers=headers,
+            method=method,
+            cookie=None,
+            status=status,
+            mime=mime,
+            checks=checks,
+        )
+    return f
+
+
+def setupclass_helper(params, auth=None, xsrf=None):
+    identities = None
+    
+    if auth:
+        assert auth["type"] == "google-oauth2"
+        from auth import google_oauth2, log_handler
+
+        scheme = params["scheme"]
+        host = params["host"]
+        path = auth["path"]
+
+        log_handler.setLevel(log.level)
+
+        credentials_path = os.path.join(conf_dir, auth["credentials"])
+
+        st = os.stat(credentials_path)
+        if st.st_mode & stat.S_IROTH or st.st_mode & stat.S_IWOTH:
+            sys.stderr.write(u"%s: Credential paths may not be readable or writable by all.\n" % credentials_path);
+            sys.exit(1)
+
+        with open(credentials_path) as cr_handle:
+            cr_data = json.load(cr_handle)
+
+        identities = {}
+
+        for name in auth["identities"]:
+            credentials = cr_data[name]
+            email = credentials["email"]
+            password = credentials["password"]
+
+            identities[name] = google_oauth2(scheme, host, path, email, password)
+            identities[name].verify = False
+
+    @classmethod
+    def f(cls):
+        HttpTest.setUpClass()
+        cls.identities = identities
+        cls.xsrf = xsrf
+
     return f
 
 
@@ -289,8 +339,13 @@ PARAMS = {
     "path": {},
     "query": {},
 
-    "mime": {},
+    "identity": {},
+
     "headers": {},
+    "method": {},
+
+    "status": {},
+    "mime": {},
     "checks": {},
 }
 
@@ -316,15 +371,14 @@ def update_params(*args):
 
 def env_params(params, env=None):
     updated = copy.deepcopy(params)
-    if env:
-        for key, value in params.items():
-            if isinstance(value, basestring) and value.startswith("$"):
-                env_key = value[1:]
-                value = os.getenv(env_key, None)
-                if value is not None:
-                    updated[key] = value
-                elif env_key in env:
-                    updated[key] = env[env_key]
+    for key, value in params.items():
+        if isinstance(value, basestring) and value.startswith("$"):
+            env_key = value[1:]
+            value = os.getenv(env_key, None)
+            if value is not None:
+                updated[key] = value
+            elif env and env_key in env:
+                updated[key] = env[env_key]
                         
     return updated
 
@@ -337,6 +391,28 @@ default_params = {
         "mako"
     ]
 }
+
+
+
+if __name__ == "__main__":
+    usage = """%s=JSON %%prog
+
+JSON    Test data in JSON format, supplied as an environment variable.
+""" % CONF_PATH_KEY
+
+    parser = OptionParser(usage=usage)
+    parser.add_option("-v", "--verbose", action="count", dest="verbose",
+                      help="Print verbose information for debugging.", default=0)
+    parser.add_option("-q", "--quiet", action="count", dest="quiet",
+                      help="Suppress warnings.", default=0)
+
+    (options, args) = parser.parse_args()
+    args = [arg.decode(sys.getfilesystemencoding()) for arg in args]
+
+    log_level = (logging.ERROR, logging.WARNING, logging.INFO, logging.DEBUG,)[
+        max(0, min(3, 1 + options.verbose - options.quiet))]
+
+    log.setLevel(log_level)
 
 
 
@@ -355,14 +431,24 @@ if tests:
         group_name = group.get("group", None)
         group_tests = group.get("tests", None)
 
+        group_auth = group.get("auth", None)
+        group_xsrf = group.get("xsrf", None)
+
         if not (group_name and group_tests):
             continue
 
         class_name = "Test%s" % str(group_name)
         class_dict = {}
 
-        test_names = set()
+        setupclass = setupclass_helper(
+            env_params(group_params, env),
+            group_auth,
+            group_xsrf
+        )
+        if setupclass:
+            class_dict["setUpClass"] = setupclass
 
+        test_names = set()
         for test in group_tests:
             if isinstance(test, basestring):
                 test = {
@@ -401,6 +487,8 @@ if tests:
             else:
                 test_name = "test_%04d" % counter
 
+            log.debug(url)
+
             func = http_helper(url, resource_params)
             func.func_name = test_name
             class_dict[test_name] = func
@@ -413,23 +501,7 @@ if tests:
 
 
 if __name__ == "__main__":
-    usage = """%s=JSON %%prog
-
-JSON    Test data in JSON format, supplied as an environment variable.
-""" % conf_path_key
-
-    parser = OptionParser(usage=usage)
-    parser.add_option("-v", "--verbose", action="count", dest="verbose",
-                      help="Print verbose information for debugging.", default=0)
-    parser.add_option("-q", "--quiet", action="count", dest="quiet",
-                      help="Suppress warnings.", default=0)
-
-    (options, args) = parser.parse_args()
-    args = [arg.decode(sys.getfilesystemencoding()) for arg in args]
-
-    log_level = (logging.ERROR, logging.WARNING, logging.INFO, logging.DEBUG,)[
-        max(0, min(3, 1 + options.verbose - options.quiet))]
-
-    log.setLevel(log_level)
-
     unittest.main()
+
+
+

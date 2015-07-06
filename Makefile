@@ -13,7 +13,7 @@ package : test_http.py setup.py
 $(DIST) : package
 
 
-install :
+install : package
 	cp test_http.py /usr/local/bin/test_http
 	python setup.py install
 
