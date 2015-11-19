@@ -18,11 +18,33 @@ import lxml.html
 log = logging.getLogger('test_http')
 log.addHandler(logging.StreamHandler())
 
-
-
 conf_path_key = "HTTP_TEST_CONF"
 conf_path = os.getenv(conf_path_key, None)
-conf = json.load(open(conf_path))
+
+
+
+if not conf_path:
+    sys.stderr.write(u"""
+No configuration path set. Set one as follows:
+
+     export %s=path/to/conf.json
+     test_http
+
+or:
+
+     %s=path/to/conf.json test_http
+
+""" % (conf_path_key, conf_path_key))
+    sys.stderr.flush()
+    sys.exit(1)
+
+try:
+    conf = json.load(open(conf_path))
+except Exception as e:
+    sys.stderr.write(u"Could not load configuration file `%s` set by environment variable `%s`.\n" % (conf_path, conf_path_key))
+    sys.stderr.write(unicode(e) + u"\n")
+    sys.stderr.flush()
+    raise
 
 
 
@@ -44,7 +66,7 @@ class Http(object):
         cls.make_http()
         response, content = cls.http.request(url)
         return response["set-cookie"]
-        
+
     def __init__(self):
         self.make_http()
 
@@ -54,7 +76,7 @@ class Http(object):
         except Exception as e:
             print "", e
             return
-            
+
         title = page.find(".//title")
         if title is not None:
             return title.text
@@ -69,7 +91,7 @@ class Http(object):
 
         log.info(u"\n%-64s  %s" % (url, title or u""))
         content = content.decode("utf-8")
-            
+
         return response, content
 
     def http_request(self, path, cookie=None, mime=None, headers=None, checks=None, status=200):
@@ -121,15 +143,15 @@ class Http(object):
 
         for f_name, f_kwargs in check_functions:
             getattr(self, f_name)(content, **f_kwargs)
-        
+
         return content
-        
+
     def http_request_not_found(self, path, cookie=None):
         headers = {}
         if cookie:
             headers["Cookie"] = cookie
         response, content = self.get_http_old(path, headers)
-        
+
         self.assertEqual(response.status, 404, msg=path)
 
         return content
@@ -139,7 +161,7 @@ class Http(object):
         if cookie:
             headers["Cookie"] = cookie
         response, content = self.get_http_old(path, headers)
-        
+
         self.assertEqual(response.status, 302, msg=path)
         self.assertEqual(response["location"][:11], "/auth/login")
 
@@ -148,7 +170,7 @@ class Http(object):
         if cookie:
             headers["Cookie"] = cookie
         response, content = self.get_http_old(path, headers)
-        
+
         self.assertEqual(response.status, 403, msg=path)
 
     # Checks
@@ -156,7 +178,7 @@ class Http(object):
     automime = {
         "json": "application/json"
         }
-    
+
     checks = {
         "json": "check_json_ok",
         "mako": "check_mako_ok",
@@ -255,19 +277,19 @@ class Http(object):
         self.assertEqual(self.logged_in(response), False)
 
 
-        
+
 class HttpTest(unittest.TestCase, Http):
     _multiprocess_can_split_ = True
-    
+
     def __init__(self, *args, **kwargs):
         unittest.TestCase.__init__(self, *args, **kwargs)
         Http.__init__(self)
-        
+
     @classmethod
     def setUpClass(cls):
         cls.longMessage = True
 
-        
+
 
 def http_helper(url, mime=None, headers=None, checks=None):
     def f(self):
@@ -284,7 +306,7 @@ if not conf_path:
 default_checks = [
     "mako"
 ]
-    
+
 counter = 0
 tests = conf.get("tests", None)
 if tests:
