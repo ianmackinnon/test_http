@@ -1,77 +1,75 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
+#!/usr/bin/env python3
 
 import os
+import re
 import sys
 import copy
 import json
 import stat
-import random
+import pprint
+import warnings
 import logging
+import argparse
 import unittest
+from urllib.parse import urlencode
+from urllib.parse import urlunparse
+
 import requests
-from urllib import urlencode
-from optparse import OptionParser
-from urlparse import urlparse, urlunparse
 
 
 
-log = logging.getLogger('test_http')
-log.addHandler(logging.StreamHandler())
+LOG = logging.getLogger('test_http')
+LOG.addHandler(logging.StreamHandler())
 
 
+
+ENV_CONF = "HTTP_TEST_CONF"
+ENV_HOST = "HTTP_TEST_HOST"
 
 DEFAULT_METHOD = 'GET'
 DEFAULT_MIME = 'text/html'
 DEFAULT_STATUS = 200
-CONF_PATH_KEY = "HTTP_TEST_CONF"
+DEFAULT_PARAMS = {
+    "scheme": "http",
+    "checks": [
+        "mako"
+    ]
+}
+
+VERIFY = True
 
 
 
-conf_path = os.getenv(CONF_PATH_KEY, None)
-if conf_path is None:
-    sys.stderr.write(u"Environment variable %s must be set to the path of a JSON configuration file.\n" % CONF_PATH_KEY)
-    sys.exit(1)
+CONF_PATH = None
+CONF_DIR = None
+CONF_HANDLE = None
+CONF = None
 
-conf_dir = os.path.dirname(conf_path)
-try:
-    conf_handle=open(conf_path)
-except IOError as e:
-    sys.stderr.write(u"Could not open configuration file %s.\n" % conf_path)
-    sys.stderr.write(unicode(e) + "\n")
-    sys.exit(1)
+COUNTER = None
+ENV = None
+TESTS = None
 
-try:
-    conf = json.load(conf_handle)
-except ValueError as e:
-    sys.stderr.write(u"configuration file %s is not valid JSON.\n" % conf_path)
-    sys.stderr.write(unicode(e) + "\n")
-    sys.exit(1)
 
-    
 
 class Http(object):
     error_html = "/tmp/test_http_error.html"
 
-    def __init__(self):
-        self.session = requests.Session()
-        self.session.verify = False,
-
     def http_request(
             self,
             uri,
-            identity=None,
             headers=None,
             method=None,
             cookie=None,
             status=None,
-            mime=None, 
+            mime=None,
             checks=None,
     ):
-        if identity:
-            session = self.identities[identity]
-        else:
+
+        if self.session:
             session = self.session
+        else:
+            session = requests.Session()  # Close at end of `http_request`.
+            session.verify = VERIFY
 
         if headers is None:
             headers = {}
@@ -91,6 +89,11 @@ class Http(object):
                     data[query] = cookie.value
                     break
 
+        headers.update({
+            # Because `gzip` distorts `Content-Length`:
+            "Accept-Encoding": "identity"
+        })
+
         response = session.request(
             method,
             uri,
@@ -103,7 +106,7 @@ class Http(object):
         automime = None
         check_functions = []
         for check in checks:
-            if isinstance(check, basestring):
+            if isinstance(check, str):
                 f_kwargs = {}
                 check_name = check
             else:
@@ -111,7 +114,7 @@ class Http(object):
                 check_name = f_kwargs.pop("name", None)
             f_name = self.checks.get(check_name, None)
             if not f_name:
-                log.warning("No check function found for \"%s\"." % check_name)
+                LOG.warning("No check function found for \"%s\".", check_name)
                 continue
             check_functions.append((f_name, f_kwargs))
 
@@ -119,7 +122,9 @@ class Http(object):
                 check_automime = self.automime.get(check_name, None)
                 if check_automime:
                     if automime:
-                        log.warning(u"Automatic mime type already set (%s, %s)." % (automime, check_automime))
+                        LOG.warning(
+                            "Automatic mime type already set (%s, %s).",
+                            automime, check_automime)
                     automime = check_automime
 
         if mime is None:
@@ -138,24 +143,47 @@ class Http(object):
         self.assertEqual(response_mime, mime, uri)
         if "content-length" in response.headers:
             self.assertNotEqual(response.headers["content-length"], 0, uri)
+            if (
+                    int(response.headers["content-length"]) !=
+                    len(response.text)
+            ):
+                LOG.warning(
+                    "`Content-Length` header (%d) does not "
+                    "match content length (%d).",
+                    int(response.headers["content-length"]),
+                    len(response.text)
+                )
+        elif "transfer-encoding" in response.headers:
+            if response.headers["transfer-encoding"].lower() != "chunked":
+                LOG.warning(
+                    "`Content-Length` header missing and "
+                    "`Transfer-Encoding` (%s) is not `chunked`.",
+                    int(response.headers["transfer-encoding"]))
         else:
-            log.warning("Required header missing: \"content-length\"")
-
+            LOG.warning(repr(response.headers))
+            LOG.warning(
+                "Required header missing: `content-length`. "
+                "Content length %d.", len(response.text))
         for f_name, f_kwargs in check_functions:
             getattr(self, f_name)(response.text, **f_kwargs)
-        
+
+        if not self.session:
+            session.close()
+
         return response.text
-        
+
     # Checks
 
     automime = {
         "json": "application/json"
         }
-    
+
     checks = {
         "json": "check_json_ok",
         "mako": "check_mako_ok",
         "php": "check_php_ok",
+
+        "jsonPrint": "check_json_print",
 
         "jsonValue": "check_json_value",
         "jsonCount": "check_json_count",
@@ -167,7 +195,7 @@ class Http(object):
         try:
             json.loads(content)
         except ValueError as e:
-            self.fail("JSON decode error: %s." % unicode(e))
+            self.fail("JSON decode error: %s." % str(e))
 
     def check_mako_ok(self, html):
         if "Mako Runtime Error" in html:
@@ -183,21 +211,37 @@ class Http(object):
                 html_file.close()
             self.fail("PHP error. See '%s'." % self.error_html)
 
+    def check_json_print(self, content):
+        try:
+            data = json.loads(content)
+        except ValueError as e:
+            self.fail("JSON decode error: %s." % str(e))
+
+        pprint.pprint(data)
+
     def check_json_path(self, content, path):
         try:
             data = json.loads(content)
         except ValueError as e:
-            self.fail("JSON decode error: %s." % unicode(e))
+            self.fail("JSON decode error: %s." % str(e))
 
         cursor = data
-        keys = path.split(".")[1:]
+        keys = path.split(".")
+        if keys:
+            first = keys.pop(0)
+            assert not first, \
+                "path be empty or start with `.`, not %s." % repr(first)
         for key in keys:
+            if re.match(r"[0-9]+$", key):
+                key = int(key)
             try:
                 cursor = cursor[key]
             except KeyError as e:
-                self.fail(u"Path does not exist: \"%s\"" % path)
+                self.fail(
+                    "Path does not exist: `%s`. Key: %s, Cursor: `%s`." %
+                    (path, repr(key), cursor))
 
-        log.debug(u"JSON path: \"%s\"; value: \"%s\"." % (path, cursor))
+        LOG.debug("JSON path: \"%s\"; value: \"%s\".", path, cursor)
 
         return cursor
 
@@ -209,6 +253,10 @@ class Http(object):
             self.assertGreaterEqual(value, kwargs["gte"])
         if "lte" in kwargs:
             self.assertLessEqual(value, kwargs["lte"])
+        if "contains" in kwargs:
+            self.assertIn(kwargs["contains"], value)
+        if "icontains" in kwargs:
+            self.assertIn(kwargs["icontains"].lower(), value.lower())
 
     def check_json_count(self, content, path, **kwargs):
         value = len(self.check_json_path(content, path))
@@ -243,30 +291,28 @@ class Http(object):
             cookies[name] = value
         return bool(cookies.get('s', None))
 
-    def assertLoggedIn(self, response):
+    def assert_logged_in(self, response):
         self.assertEqual(self.logged_in(response), True)
 
-    def assertNotLoggedIn(self, response):
+    def assert_not_logged_in(self, response):
         self.assertEqual(self.logged_in(response), False)
 
 
-        
+
 class HttpTest(unittest.TestCase, Http):
     _multiprocess_can_split_ = True
-    
+
     def __init__(self, *args, **kwargs):
         unittest.TestCase.__init__(self, *args, **kwargs)
         Http.__init__(self)
-        
+
     @classmethod
     def setUpClass(cls):
         cls.longMessage = True
 
-        
+
 
 def http_helper(url, params):
-    identity = params.get("identity", None)
-
     headers = params.get("headers", None)
     method = params.get("method", None)
 
@@ -274,10 +320,11 @@ def http_helper(url, params):
     mime = params.get("mime", None)
     checks = params.get("checks", None)
 
-    def f(self):
-        html = self.http_request(
+    url = params_expand_url(params, url)
+
+    def func(self):
+        self.http_request(
             url,
-            identity=identity,
             headers=headers,
             method=method,
             cookie=None,
@@ -285,49 +332,104 @@ def http_helper(url, params):
             mime=mime,
             checks=checks,
         )
-    return f
+    return func
+
+
+
+def params_expand_url(params, url):
+    if "://" in url:
+        return url
+
+    scheme = params["scheme"]
+    host = params["host"]
+    if host == "$HOST":
+        host = os.getenv(ENV_HOST, None)
+
+    if not "://" in host:
+        host = "%s://%s" % (scheme, host)
+
+    url = host + url
+
+    return url
+
+
+
+class AuthenticationException(Exception):
+    pass
+
 
 
 def setupclass_helper(params, auth=None, xsrf=None):
-    identities = None
-    
+    session = None
+
     if auth:
-        assert auth["type"] == "google-oauth2"
-        from auth import google_oauth2, log_handler
+        if not auth.get("type", None):
+            LOG.error("Auth `type` not supplied.")
+            sys.exit()
+        if auth["type"] == "local":
+            url = params_expand_url(params, auth["url"])
+            session = requests.Session()  # Close in `teardownclass_helper`
+            session.get(url)
+            session.verify = VERIFY
+        elif auth["type"] == "hash":
+            credentials_path = auth.get("credentials", None)
+            credentials_path = os.path.join(
+                os.path.dirname(os.path.realpath(CONF_PATH)),
+                credentials_path
+            )
+            host = params.get("host", None)
+            if host == "$HOST":
+                host = os.getenv(ENV_HOST, None)
 
-        scheme = params["scheme"]
-        host = params["host"]
-        path = auth["path"]
+            st = os.stat(credentials_path)
+            if st.st_mode & stat.S_IROTH or st.st_mode & stat.S_IWOTH:
+                LOG.error("%s: Credential paths may not be "
+                          "readable or writable by `other`.\n",
+                          credentials_path)
+                sys.exit(1)
 
-        log_handler.setLevel(log.level)
+            with open(credentials_path, "r", encoding="utf-8") as fp:
+                credentials = json.load(fp)
+            hash_ = credentials.get(host, None)
+            if not hash_:
+                raise AuthenticationException(
+                    "No hash supplied for host `%s`." % host)
 
-        credentials_path = os.path.join(conf_dir, auth["credentials"])
+            url = params_expand_url(params, auth["url"])
+            join = "&" if "?" in url else "?"
+            url += "%shash=%s" % (join, hash_)
+            session = requests.Session()  # Close in `teardownclass_helper`
+            r = session.get(url)
 
-        st = os.stat(credentials_path)
-        if st.st_mode & stat.S_IROTH or st.st_mode & stat.S_IWOTH:
-            sys.stderr.write(u"%s: Credential paths may not be readable or writable by all.\n" % credentials_path);
-            sys.exit(1)
+            if r.status_code != 200:
+                raise AuthenticationException(
+                    "Error: %s login failed (%d)." %
+                    (auth["type"], r.status_code))
 
-        with open(credentials_path) as cr_handle:
-            cr_data = json.load(cr_handle)
-
-        identities = {}
-
-        for name in auth["identities"]:
-            credentials = cr_data[name]
-            email = credentials["email"]
-            password = credentials["password"]
-
-            identities[name] = google_oauth2(scheme, host, path, email, password)
-            identities[name].verify = False
+            session.verify = VERIFY
+        else:
+            LOG.error("Unknown auth type `%s`.", auth["type"])
+            sys.exit()
 
     @classmethod
-    def f(cls):
+    def func(cls):
         HttpTest.setUpClass()
-        cls.identities = identities
+        cls.session = session
         cls.xsrf = xsrf
+        warnings.simplefilter("ignore", ResourceWarning)
 
-    return f
+    return func
+
+
+
+def teardownclass_helper():
+    @classmethod
+    def func(cls):
+        if cls.session:
+            cls.session.close()
+        HttpTest.tearDownClass()
+
+    return func
 
 
 
@@ -348,6 +450,7 @@ PARAMS = {
     "mime": {},
     "checks": {},
 }
+
 
 
 def update_params(*args):
@@ -371,137 +474,169 @@ def update_params(*args):
 
 def env_params(params, env=None):
     updated = copy.deepcopy(params)
-    for key, value in params.items():
-        if isinstance(value, basestring) and value.startswith("$"):
+    for key, value in list(params.items()):
+        if isinstance(value, str) and value.startswith("$"):
             env_key = value[1:]
             value = os.getenv(env_key, None)
             if value is not None:
                 updated[key] = value
             elif env and env_key in env:
                 updated[key] = env[env_key]
-                        
+
     return updated
 
 
-    
 
-default_params = {
-    "scheme": "http",
-    "checks": [
-        "mako"
-    ]
-}
+def build_tests():
+    global CONF_PATH, CONF_DIR, CONF_HANDLE, CONF
+    global COUNTER, ENV, TESTS
 
+    CONF_PATH = os.getenv(ENV_CONF, None)
+    if CONF_PATH is None:
+        sys.stderr.write(
+            "Environment variable %s must be set to the path of a "
+            "JSON configuration file.\n" % ENV_CONF)
+        sys.exit(1)
 
+    CONF_DIR = os.path.dirname(CONF_PATH)
+    try:
+        CONF_HANDLE = open(CONF_PATH, "r", encoding="utf-8")
+    except IOError as e:
+        sys.stderr.write("Could not open configuration file %s.\n" % CONF_PATH)
+        sys.stderr.write(str(e) + "\n")
+        sys.exit(1)
 
-if __name__ == "__main__":
-    usage = """%s=JSON %%prog
+    try:
+        CONF = json.load(CONF_HANDLE)
+    except ValueError as e:
+        sys.stderr.write(
+            "configuration file %s is not valid JSON.\n" % CONF_PATH)
+        sys.stderr.write(str(e) + "\n")
+        sys.exit(1)
 
-JSON    Test data in JSON format, supplied as an environment variable.
-""" % CONF_PATH_KEY
-
-    parser = OptionParser(usage=usage)
-    parser.add_option("-v", "--verbose", action="count", dest="verbose",
-                      help="Print verbose information for debugging.", default=0)
-    parser.add_option("-q", "--quiet", action="count", dest="quiet",
-                      help="Suppress warnings.", default=0)
-
-    (options, args) = parser.parse_args()
-    args = [arg.decode(sys.getfilesystemencoding()) for arg in args]
-
-    log_level = (logging.ERROR, logging.WARNING, logging.INFO, logging.DEBUG,)[
-        max(0, min(3, 1 + options.verbose - options.quiet))]
-
-    log.setLevel(log_level)
-
-
-
-if not conf_path:
-    parser.print_usage()
-    sys.exit(1)
+    if not CONF_PATH:
+        LOG.error("Must supply configuration path as environment variable.")
+        sys.exit(1)
 
 
+    COUNTER = 0
+    ENV = CONF.get("env", None)
+    TESTS = CONF.get("tests", None)
 
-counter = 0
-env = conf.get("env", None)
-tests = conf.get("tests", None)
-if tests:
-    for group in tests:
-        group_params = update_params(default_params, group)
-        group_name = group.get("group", None)
-        group_tests = group.get("tests", None)
+    if TESTS:
+        for group in TESTS:
+            group_params = update_params(DEFAULT_PARAMS, group)
+            group_name = group.get("group", None)
+            group_tests = group.get("tests", None)
 
-        group_auth = group.get("auth", None)
-        group_xsrf = group.get("xsrf", None)
+            group_auth = group.get("auth", None)
+            group_xsrf = group.get("xsrf", None)
 
-        if not (group_name and group_tests):
-            continue
-
-        class_name = "Test%s" % str(group_name)
-        class_dict = {}
-
-        setupclass = setupclass_helper(
-            env_params(group_params, env),
-            group_auth,
-            group_xsrf
-        )
-        if setupclass:
-            class_dict["setUpClass"] = setupclass
-
-        test_names = set()
-        for test in group_tests:
-            if isinstance(test, basestring):
-                test = {
-                    "url": test
-                }
-            resource_params = update_params(group_params, test)
-            resource_params = env_params(resource_params, env)
-
-            url = resource_params.get("url", None)
-            if url is None:
-                query = resource_params.get("query", "")
-                if query:
-                    query = urlencode(query, True)
-                try:
-                    url = urlunparse((
-                        resource_params["scheme"],
-                        resource_params["host"],
-                        resource_params.get("path", ""),
-                        "",
-                        query,
-                        "",
-                        ))
-                except ValueError as e:
-                    url = None
-            if url is None:
-                log.warning("Parameter `url` missing from test and could not be constructed from `scheme` and `host`.")
+            if not (group_name and group_tests):
                 continue
 
-            counter += 1
-            name = resource_params.get("name", None)
-            if name:
-                if name in test_names:
-                    log.warning("Duplicate test name '%s'" % name)
-                test_names.add(name)
-                test_name = "test_%s" % name
-            else:
-                test_name = "test_%04d" % counter
+            class_name = "Test%s" % str(group_name)
+            class_dict = {}
 
-            log.debug(url)
+            class_dict["setUpClass"] = setupclass_helper(
+                env_params(group_params, ENV),
+                group_auth,
+                group_xsrf
+            )
+            class_dict["tearDownClass"] = teardownclass_helper()
 
-            func = http_helper(url, resource_params)
-            func.func_name = test_name
-            class_dict[test_name] = func
+            test_names = set()
+            for test in group_tests:
+                if isinstance(test, str):
+                    test = {
+                        "url": test
+                    }
+                resource_params = update_params(group_params, test)
+                resource_params = env_params(resource_params, ENV)
 
-        if not class_dict:
-            continue
+                url = resource_params.get("url", None)
+                if url is None:
+                    query = resource_params.get("query", "")
+                    if query:
+                        query = urlencode(query, True)
+                    try:
+                        url = urlunparse((
+                            resource_params["scheme"],
+                            resource_params["host"],
+                            resource_params.get("path", ""),
+                            "",
+                            query,
+                            "",
+                            ))
+                    except ValueError as e:
+                        url = None
+                if url is None:
+                    LOG.warning(
+                        "Parameter `url` missing from test and could not "
+                        "be constructed from `scheme` and `host`.")
+                    continue
 
-        globals()[class_name] = type(class_name, (HttpTest, ), class_dict)
+                COUNTER += 1
+                name = resource_params.get("name", None)
+                if name:
+                    if name in test_names:
+                        LOG.warning("Duplicate test name '%s'", name)
+                    test_names.add(name)
+                    test_name = "test_%s" % name
+                else:
+                    test_name = "test_%04d" % COUNTER
+
+                func = http_helper(url, resource_params)
+                func.__name__ = test_name
+                class_dict[test_name] = func
+
+            if not class_dict:
+                continue
+
+            globals()[class_name] = type(class_name, (HttpTest, ), class_dict)
+
+
+
+def parse_arguments():
+    parser = argparse.ArgumentParser(
+        description= \
+        """Test HTTP services using Python unitests and JSON descriptions.
+
+    Usage: %s=JSON test_http.py
+
+""" % ENV_CONF)
+    parser.add_argument(
+        "--verbose", "-v",
+        action="count", default=0,
+        help="Print verbose information for debugging.")
+    parser.add_argument(
+        "--quiet", "-q",
+        action="count", default=0,
+        help="Suppress warnings.")
+
+    parser.add_argument(
+        "tests", metavar="TESTS",
+        nargs="*",
+        help="Tests to run.")
+
+    args = parser.parse_args()
+
+    level = (logging.ERROR, logging.WARNING, logging.INFO, logging.DEBUG)[
+        max(0, min(3, 1 + args.verbose - args.quiet))]
+    LOG.setLevel(level)
+
+
+
+def run_tests():
+    test_object = unittest.main(exit=False)
+    sys.exit(not test_object.result.wasSuccessful())
 
 
 
 if __name__ == "__main__":
-    unittest.main()
+    parse_arguments()
 
+build_tests()
 
-
+if __name__ == "__main__":
+    run_tests()
