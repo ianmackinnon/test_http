@@ -1,8 +1,12 @@
 {
+  "env": {
+    "EXAMPLE": "www.example.com"
+  },
   "tests": [
     {
       "group": "Example",
       "tests": [
+        
         {
           "url": "http://www.example.com",
           "name": "root",
@@ -24,6 +28,32 @@
 
         "http://www.example.net"
 
+      ]
+    },
+    {
+      "group": "ExampleEnv",
+      "host": "$EXAMPLE",
+      "header": {
+        "Accept": "text/html"
+      },
+      "mime": "text/html",
+      "tests": [
+        
+        {
+          "name": "root",
+          "path": "/",
+          "checks": [
+            {
+              "name": "containsNot",
+              "term": "Lorem ipsum"
+            },
+            {
+              "name": "contains",
+              "term": "<h1>Example Domain</h1>"
+            }
+          ]
+        }
+        
       ]
     },
     {
