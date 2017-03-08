@@ -14,6 +14,8 @@ import unittest
 from urllib.parse import urlencode
 from urllib.parse import urlunparse
 
+from onetimepass import get_totp
+
 import requests
 
 
@@ -366,20 +368,16 @@ def setupclass_helper(params, auth=None, xsrf=None):
         if not auth.get("type", None):
             LOG.error("Auth `type` not supplied.")
             sys.exit()
-        if auth["type"] == "local":
-            url = params_expand_url(params, auth["url"])
-            session = requests.Session()  # Close in `teardownclass_helper`
-            session.get(url)
-            session.verify = VERIFY
-        elif auth["type"] == "hash":
+        if auth["type"] == "firma-password":
             credentials_path = auth.get("credentials", None)
+            if not credentials_path:
+                LOG.error("No credentials path supplied.")
+                sys.exit()
+
             credentials_path = os.path.join(
                 os.path.dirname(os.path.realpath(CONF_PATH)),
                 credentials_path
             )
-            host = params.get("host", None)
-            if host == "$HOST":
-                host = os.getenv(ENV_HOST, None)
 
             st = os.stat(credentials_path)
             if st.st_mode & stat.S_IROTH or st.st_mode & stat.S_IWOTH:
@@ -390,16 +388,59 @@ def setupclass_helper(params, auth=None, xsrf=None):
 
             with open(credentials_path, "r", encoding="utf-8") as fp:
                 credentials = json.load(fp)
-            hash_ = credentials.get(host, None)
-            if not hash_:
-                raise AuthenticationException(
-                    "No hash supplied for host `%s`." % host)
 
-            url = params_expand_url(params, auth["url"])
-            join = "&" if "?" in url else "?"
-            url += "%shash=%s" % (join, hash_)
+            account = auth.get("account", None)
+            if not account:
+                LOG.error("No account name supplied.")
+                sys.exit()
+
+            if account not in credentials:
+                LOG.error("Account name %s not found in credentials.", account)
+                sys.exit()
+
+            account_data = credentials[account]
+
+            email = account_data.get("email", None)
+            user_id = account_data.get("user_id", None)
+            password = account_data.get("password", None)
+            onetime_secret = account_data.get("onetime_secret", None)
+
+            if not (email or user_id):
+                LOG.error("`email` or `user_id` not supplied in credentials.")
+                sys.exit()
+
+            if not password:
+                LOG.error("`password` not supplied in credentials.")
+                sys.exit()
+
+            if not onetime_secret:
+                LOG.error("`onetime_secret` not supplied in credentials.")
+                sys.exit()
+
+            host = params.get("host", None)
+            if host == "$HOST":
+                host = os.getenv(ENV_HOST, None)
+
+            url = auth.get("url", None)
+            if not url:
+                LOG.error("No URL supplied.")
+                sys.exit()
+
+            url = params_expand_url(params, url)
+
+            data = {
+                "password": password,
+                "token": get_totp(onetime_secret),
+            }
+
+            if email:
+                data["email"] = email
+
+            if user_id:
+                data["user_id"] = user_id
+
             session = requests.Session()  # Close in `teardownclass_helper`
-            r = session.get(url)
+            r = session.get(url, data=data)
 
             if r.status_code != 200:
                 raise AuthenticationException(
