@@ -65,6 +65,8 @@ class Http(object):
             status=None,
             mime=None,
             checks=None,
+            location=None,
+            host=None,
     ):
 
         if self.session:
@@ -141,19 +143,38 @@ class Http(object):
         if status is None:
             status = DEFAULT_STATUS
 
+        message = "%s" % uri
+        if 300 <= response.status_code <= 399:
+            location = response.headers.get("Location", None)
+            if location:
+                message = "%s -> %s" % (uri, location)
+
         self.assertEqual(response.status_code, status, uri)
+
+        if location and status in (301, 302):
+            self.assertIn("location", response.headers)
+            response_location = response.headers["location"]
+
+            if host:
+                location = params_expand_url({
+                    "host": host
+                }, location)
+
+            self.assertEqual(response_location, location, uri)
+
         self.assertEqual(response_mime, mime, uri)
         if "content-length" in response.headers:
             self.assertNotEqual(response.headers["content-length"], 0, uri)
+            received_length = len(response.text.encode("utf-8"))
             if (
                     int(response.headers["content-length"]) !=
-                    len(response.text)
+                    received_length
             ):
                 LOG.warning(
                     "`Content-Length` header (%d) does not "
                     "match content length (%d).",
                     int(response.headers["content-length"]),
-                    len(response.text)
+                    received_length
                 )
         elif "transfer-encoding" in response.headers:
             if response.headers["transfer-encoding"].lower() != "chunked":
@@ -165,7 +186,7 @@ class Http(object):
             LOG.warning(repr(response.headers))
             LOG.warning(
                 "Required header missing: `content-length`. "
-                "Content length %d.", len(response.text))
+                "Content length %d.", received_length)
         for f_name, f_kwargs in check_functions:
             getattr(self, f_name)(response.text, **f_kwargs)
 
@@ -321,6 +342,7 @@ def http_helper(url, params):
     status = params.get("status", None)
     mime = params.get("mime", None)
     checks = params.get("checks", None)
+    location = params.get("location", None)
 
     url = params_expand_url(params, url)
 
@@ -331,8 +353,10 @@ def http_helper(url, params):
             method=method,
             cookie=None,
             status=status,
+            location=location,
             mime=mime,
             checks=checks,
+            host=params.get("host", None)
         )
     return func
 
@@ -342,12 +366,12 @@ def params_expand_url(params, url):
     if "://" in url:
         return url
 
-    scheme = params["scheme"]
     host = params["host"]
     if host == "$HOST":
         host = os.getenv(ENV_HOST, None)
 
     if not "://" in host:
+        scheme = params["scheme"]
         host = "%s://%s" % (scheme, host)
 
     url = host + url
@@ -488,6 +512,7 @@ PARAMS = {
     "method": {},
 
     "status": {},
+    "location": {},
     "mime": {},
     "checks": {},
 }
