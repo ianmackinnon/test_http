@@ -97,7 +97,6 @@ class Http(object):
             # Because `gzip` distorts `Content-Length`:
             "Accept-Encoding": "identity"
         })
-
         response = session.request(
             method,
             uri,
@@ -149,7 +148,7 @@ class Http(object):
             if location:
                 message = "%s -> %s" % (uri, location)
 
-        self.assertEqual(response.status_code, status, uri)
+        self.assertEqual(response.status_code, status, message)
 
         if location and status in (301, 302):
             self.assertIn("location", response.headers)
