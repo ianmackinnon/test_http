@@ -27,6 +27,7 @@ LOG.addHandler(logging.StreamHandler())
 
 ENV_CONF = "HTTP_TEST_CONF"
 ENV_HOST = "HTTP_TEST_HOST"
+ENV_PARAM = "HTTP_TEST_PARAM"
 
 DEFAULT_METHOD = 'GET'
 DEFAULT_MIME = 'text/html'
@@ -335,7 +336,7 @@ class HttpTest(unittest.TestCase, Http):
 
 
 
-def http_helper(url, params):
+def http_helper(url, params, params_extra=None):
     headers = params.get("headers", None)
     method = params.get("method", None)
 
@@ -344,7 +345,7 @@ def http_helper(url, params):
     checks = params.get("checks", None)
     location = params.get("location", None)
 
-    url = params_expand_url(params, url)
+    url = params_expand_url(params, url, params_extra=params_extra)
 
     def func(self):
         self.http_request(
@@ -362,7 +363,17 @@ def http_helper(url, params):
 
 
 
-def params_expand_url(params, url):
+def expand_params(text, params):
+    if params:
+        if "{" in text and "}" in text:
+            text = text.format(**params)
+    return text
+
+
+
+def params_expand_url(params, url, params_extra=None):
+    url = expand_params(url, params_extra)
+
     if "://" in url:
         return url
 
@@ -385,7 +396,7 @@ class AuthenticationException(Exception):
 
 
 
-def setupclass_helper(params, auth=None, xsrf=None):
+def setupclass_helper(params, auth=None, xsrf=None, params_extra=None):
     session = None
 
     if auth:
@@ -397,6 +408,9 @@ def setupclass_helper(params, auth=None, xsrf=None):
             if not credentials_path:
                 LOG.error("No credentials path supplied.")
                 sys.exit()
+
+            credentials_path = expand_params(
+                credentials_path, params_extra)
 
             credentials_path = os.path.join(
                 os.path.dirname(os.path.realpath(CONF_PATH)),
@@ -584,6 +598,22 @@ def build_tests():
         LOG.error("Must supply configuration path as environment variable.")
         sys.exit(1)
 
+    param_path = os.getenv(ENV_PARAM, None)
+    params = None
+    if param_path:
+        try:
+            param_file = open(param_path, "r", encoding="utf-8")
+        except IOError as e:
+            sys.stderr.write("Could not open parameter file %s.\n" % param_path)
+            sys.stderr.write(str(e) + "\n")
+            sys.exit(1)
+        try:
+            params = json.load(param_file)
+        except ValueError as e:
+            sys.stderr.write(
+                "Parameter file %s is not valid JSON.\n" % param_path)
+            sys.stderr.write(str(e) + "\n")
+            sys.exit(1)
 
     COUNTER = 0
     ENV = CONF.get("env", None)
@@ -606,8 +636,9 @@ def build_tests():
 
             class_dict["setUpClass"] = setupclass_helper(
                 env_params(group_params, ENV),
-                group_auth,
-                group_xsrf
+                auth=group_auth,
+                xsrf=group_xsrf,
+                params_extra=params,
             )
             class_dict["tearDownClass"] = teardownclass_helper()
 
@@ -652,7 +683,7 @@ def build_tests():
                 else:
                     test_name = "test_%04d" % COUNTER
 
-                func = http_helper(url, resource_params)
+                func = http_helper(url, resource_params, params_extra=params)
                 func.__name__ = test_name
                 class_dict[test_name] = func
 
