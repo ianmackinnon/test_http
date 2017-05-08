@@ -1,4 +1,4 @@
-/* global require, casper, console, document, XPathResult, $ */
+/* global require, console, document, casper, XPathResult, $ */
 
 "use strict"; // jshint -W097
 
@@ -23,6 +23,18 @@ _.each({
     ));
   };
 });
+
+var host = casper.cli.get("host");
+if (!host) {
+  console.error("Variable `host` not defined (use argument `--host=HOST`).");
+  casper.exit(1);
+}
+
+var conf = casper.cli.get("conf");
+if (!conf) {
+  console.error("Variable `conf` not defined (use argument `--conf=JSON`).");
+  casper.exit(1);
+}
 
 console.traceLines = function (trace) {
   _.each(trace, function (v, k) {
@@ -94,18 +106,6 @@ var splitRemain = function (text, separator, n) {
   out.push(text.substr(offset));
   return out;
 };
-
-var host = casper.cli.get("host");
-if (!host) {
-  console.error("Variable `host` not defined (use argument `--host=HOST`).");
-  casper.exit(1);
-}
-
-var conf = casper.cli.get("conf");
-if (!conf) {
-  console.error("Variable `conf` not defined (use argument `--conf=JSON`).");
-  casper.exit(1);
-}
 
 var limits;
 var testLimits = casper.cli.get("tests");

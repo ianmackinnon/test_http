@@ -13,11 +13,12 @@ import argparse
 import unittest
 from urllib.parse import urlencode
 from urllib.parse import urlunparse
+from io import StringIO
 
 from onetimepass import get_totp
 
 import requests
-
+from lxml import etree
 
 
 LOG = logging.getLogger('test_http')
@@ -27,6 +28,8 @@ LOG.addHandler(logging.StreamHandler())
 
 ENV_CONF = "HTTP_TEST_CONF"
 ENV_HOST = "HTTP_TEST_HOST"
+ENV_PROXY = "HTTP_TEST_PROXY"
+ENV_SSLCERT = "HTTP_TEST_SSLCERT"
 ENV_PARAM = "HTTP_TEST_PARAM"
 
 DEFAULT_METHOD = 'GET'
@@ -98,12 +101,25 @@ class Http(object):
             # Because `gzip` distorts `Content-Length`:
             "Accept-Encoding": "identity"
         })
+
+        proxies = None
+        proxy = os.getenv(ENV_PROXY, None)
+        if proxy:
+            proxies = {
+                "http": proxy,
+                "https": proxy
+            }
+
+        verify = os.getenv(ENV_SSLCERT, True)
+
         response = session.request(
             method,
             uri,
             headers=headers,
             data=data,
             allow_redirects=False,
+            proxies=proxies,
+            verify=verify,
         )
 
         # Set mime by check if mime is null
@@ -187,8 +203,17 @@ class Http(object):
             LOG.warning(
                 "Required header missing: `content-length`. "
                 "Content length %d.", received_length)
+
+        content = response.text
+        tree = None
+        if set(self.lxml_checks) & set(dict(check_functions).keys()):
+            tree = etree.parse(StringIO(content), etree.HTMLParser())
         for f_name, f_kwargs in check_functions:
-            getattr(self, f_name)(response.text, **f_kwargs)
+            f_kwargs["uri"] = uri
+            getattr(self, f_name)(
+                tree if f_name in self.lxml_checks else content,
+                **f_kwargs
+            )
 
         if not self.session:
             session.close()
@@ -212,29 +237,36 @@ class Http(object):
         "jsonCount": "check_json_count",
         "contains": "check_contains",
         "containsNot": "check_contains_not",
+        "htmlTitle": "check_html_title",
+        "htmlXpath": "check_html_xpath",
     }
 
-    def check_json_ok(self, content):
+    lxml_checks = [
+        "check_html_title",
+        "check_html_xpath",
+    ]
+
+    def check_json_ok(self, content, **kwargs):
         try:
             json.loads(content)
         except ValueError as e:
             self.fail("JSON decode error: %s." % str(e))
 
-    def check_mako_ok(self, html):
+    def check_mako_ok(self, html, **kwargs):
         if "Mako Runtime Error" in html:
             with open(self.error_html, "w") as html_file:
                 html_file.write(html)
                 html_file.close()
             self.fail("Mako template error. See '%s'." % self.error_html)
 
-    def check_php_ok(self, html):
+    def check_php_ok(self, html, **kwargs):
         if ".php</b> on line <b>" in html:
             with open(self.error_html, "w") as html_file:
                 html_file.write(html)
                 html_file.close()
             self.fail("PHP error. See '%s'." % self.error_html)
 
-    def check_json_print(self, content):
+    def check_json_print(self, content, **kwargs):
         try:
             data = json.loads(content)
         except ValueError as e:
@@ -242,7 +274,7 @@ class Http(object):
 
         pprint.pprint(data)
 
-    def check_json_path(self, content, path):
+    def check_json_path(self, content, path, **kwargs):
         try:
             data = json.loads(content)
         except ValueError as e:
@@ -290,13 +322,24 @@ class Http(object):
         if "lte" in kwargs:
             self.assertLessEqual(value, kwargs["lte"])
 
-    def check_contains(self, content, term):
+    def check_contains(self, content, term, **kwargs):
         if not term in content:
-            self.fail("Term \"%s\" not found in content." % term)
+            self.fail("Term \"%s\" not found in content. %s" % (term, kwargs["uri"]))
 
-    def check_contains_not(self, content, term):
+    def check_contains_not(self, content, term, **kwargs):
         if term in content:
-            self.fail("Term \"%s\" found in content." % term)
+            self.fail("Term \"%s\" found in content. %s" % (term, kwargs["uri"]))
+
+    def check_html_title(self, tree, value, **kwargs):
+        title_text = None
+        for node in tree.xpath("//title"):
+            title_text = node.text
+        self.assertEqual(title_text, value)
+
+    def check_html_xpath(self, tree, selector, values, **kwargs):
+        nodes = tree.xpath(selector)
+        self.assertEqual(nodes, values, selector)
+
 
 
     # Other
