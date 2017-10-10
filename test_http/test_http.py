@@ -11,14 +11,24 @@ import warnings
 import logging
 import argparse
 import unittest
+from io import StringIO
 from urllib.parse import urlencode
 from urllib.parse import urlunparse
-from io import StringIO
-
-from onetimepass import get_totp
 
 import requests
+from onetimepass import get_totp
 from lxml import etree
+from pbr.version import VersionInfo
+
+_VERSION = VersionInfo('test_http').semantic_version()
+__version__ = _VERSION.release_string()
+__version_info__ = _VERSION.version_tuple()
+
+__all__ = (
+    "__version__",
+    "__version_info__",
+    "main",
+)
 
 
 LOG = logging.getLogger('test_http')
@@ -245,6 +255,8 @@ class Http(object):
         "check_html_title",
         "check_html_xpath",
     ]
+
+
 
     def check_json_ok(self, content, **kwargs):
         try:
@@ -616,9 +628,9 @@ def build_tests():
     CONF_PATH = os.getenv(ENV_CONF, None)
     if CONF_PATH is None:
         sys.stderr.write(
-            "Environment variable %s must be set to the path of a "
+            "Environment 0variable %s must be set to the path of a "
             "JSON configuration file.\n" % ENV_CONF)
-        sys.exit(1)
+        return
 
     CONF_DIR = os.path.dirname(CONF_PATH)
     try:
@@ -754,6 +766,11 @@ def parse_arguments():
         help="Suppress warnings.")
 
     parser.add_argument(
+        "--version", "-V",
+        action="store_true",
+        help="Print version and exit.")
+
+    parser.add_argument(
         "tests", metavar="TESTS",
         nargs="*",
         help="Tests to run.")
@@ -764,6 +781,10 @@ def parse_arguments():
         max(0, min(3, 1 + args.verbose - args.quiet))]
     LOG.setLevel(level)
 
+    if args.version:
+        sys.stdout.write("test_http %s\n" % __version__)
+        sys.exit(0)
+
 
 
 def run_tests():
@@ -772,10 +793,13 @@ def run_tests():
 
 
 
-if __name__ == "__main__":
+def main():
     parse_arguments()
+    build_tests()
+    run_tests()
 
-build_tests()
 
 if __name__ == "__main__":
-    run_tests()
+    main()
+else:
+    build_tests()

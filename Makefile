@@ -3,26 +3,27 @@ SHELL := /bin/bash
 
 NAME = test_http
 TMP = /tmp/$(name).tmp
-VERSION = 0.1.0
-DIST := dist/$(NAME)-$(VERSION).tar.gz
+BIN = /usr/local/bin
 
 
-package : test_http.py setup.py
-	python3 setup.py sdist
+package :
+	./setup.py sdist
 
-$(DIST) : package
+install :
+	./setup.py build
+	sudo ./setup.py install
+	sudo cp test_http/test_http.py $(BIN)/test_http
 
-
-install : package
-	cp test_http.py /usr/local/bin/test_http
-	python3 setup.py install
+clean :
+	sudo rm -rf AUTHORS ChangeLog build .eggs test_http.egg-info __pycache__
 
 uninstall :
-	rm -f /usr/local/bin/test_http
-	yes | sudo pip uninstall $(NAME)
+	sudo rm -rf \
+	  /usr/local/lib/python*/dist-packages/test_http* \
+	  $(BIN)/test_http
 
 test :
 	HTTP_TEST_CONF=example.json ./test_http.py
 
-serve :
+serve-test :
 	cd test_data && python3 -m SimpleHTTPServer 8088
