@@ -31,8 +31,64 @@ __all__ = (
 )
 
 
+def color_log(log):
+    color_red = '\033[91m'
+    color_green = '\033[92m'
+    color_yellow = '\033[93m'
+    color_blue = '\033[94m'
+    color_end = '\033[0m'
+
+    level_colors = (
+        ("error", color_red),
+        ("warning", color_yellow),
+        ("info", color_green),
+        ("debug", color_blue),
+    )
+
+    safe = None
+    color = None
+
+    def xor(a, b):
+        return bool(a) ^ bool(b)
+
+    def _format(value):
+        if isinstance(value, float):
+            return "%0.3f"
+        else:
+            return "%s"
+
+    def message_args(args):
+        if not args:
+            return "", []
+        if (
+                not isinstance(args[0], str) or
+                xor(len(args) > 1, "%" in args[0])
+        ):
+            return " ".join([_format(v) for v in args]), args
+        return args[0], args[1:]
+
+    def _message(args, color):
+        message, args = message_args(args)
+        return "".join([color, message, color_end])
+
+    def _args(args):
+        args = message_args(args)[1]
+        return args
+
+    def build_lambda(safe, color):
+        return lambda *args, **kwargs: getattr(log, safe)(
+            _message(args, color), *_args(args), **kwargs)
+
+    for (level, color) in level_colors:
+        safe = "%s_" % level
+        setattr(log, safe, getattr(log, level))
+        setattr(log, level, build_lambda(safe, color))
+
+
+
 LOG = logging.getLogger('test_http')
 LOG.addHandler(logging.StreamHandler())
+color_log(LOG)
 
 
 
@@ -82,7 +138,6 @@ class Http(object):
             location=None,
             host=None,
     ):
-
         if self.session:
             session = self.session
         else:
@@ -122,6 +177,7 @@ class Http(object):
 
         verify = os.getenv(ENV_SSLCERT, True)
 
+        LOG.debug(method, uri, data)
         response = session.request(
             method,
             uri,
@@ -258,27 +314,27 @@ class Http(object):
 
 
 
-    def check_json_ok(self, content, **kwargs):
+    def check_json_ok(self, content, **_kwargs):
         try:
             json.loads(content)
         except ValueError as e:
             self.fail("JSON decode error: %s." % str(e))
 
-    def check_mako_ok(self, html, **kwargs):
+    def check_mako_ok(self, html, **_kwargs):
         if "Mako Runtime Error" in html:
             with open(self.error_html, "w") as html_file:
                 html_file.write(html)
                 html_file.close()
             self.fail("Mako template error. See '%s'." % self.error_html)
 
-    def check_php_ok(self, html, **kwargs):
+    def check_php_ok(self, html, **_kwargs):
         if ".php</b> on line <b>" in html:
             with open(self.error_html, "w") as html_file:
                 html_file.write(html)
                 html_file.close()
             self.fail("PHP error. See '%s'." % self.error_html)
 
-    def check_json_print(self, content, **kwargs):
+    def check_json_print(self, content, **_kwargs):
         try:
             data = json.loads(content)
         except ValueError as e:
@@ -286,7 +342,7 @@ class Http(object):
 
         pprint.pprint(data)
 
-    def check_json_path(self, content, path, **kwargs):
+    def check_json_path(self, content, path, **_kwargs):
         try:
             data = json.loads(content)
         except ValueError as e:
@@ -336,19 +392,21 @@ class Http(object):
 
     def check_contains(self, content, term, **kwargs):
         if not term in content:
-            self.fail("Term \"%s\" not found in content. %s" % (term, kwargs["uri"]))
+            self.fail("Term \"%s\" not found in content. %s" % (
+                term, kwargs["uri"]))
 
     def check_contains_not(self, content, term, **kwargs):
         if term in content:
-            self.fail("Term \"%s\" found in content. %s" % (term, kwargs["uri"]))
+            self.fail("Term \"%s\" found in content. %s" % (
+                term, kwargs["uri"]))
 
-    def check_html_title(self, tree, value, **kwargs):
+    def check_html_title(self, tree, value, **_kwargs):
         title_text = None
         for node in tree.xpath("//title"):
             title_text = node.text
         self.assertEqual(title_text, value)
 
-    def check_html_xpath(self, tree, selector, values, **kwargs):
+    def check_html_xpath(self, tree, selector, values, **_kwargs):
         nodes = tree.xpath(selector)
         self.assertEqual(nodes, values, selector)
 
@@ -474,7 +532,7 @@ def setupclass_helper(params, auth=None, xsrf=None, params_extra=None):
             st = os.stat(credentials_path)
             if st.st_mode & stat.S_IROTH or st.st_mode & stat.S_IWOTH:
                 LOG.error("%s: Credential paths may not be "
-                          "readable or writable by `other`.\n",
+                          "readable or writable by `other`.",
                           credentials_path)
                 sys.exit(1)
 
@@ -627,25 +685,24 @@ def build_tests():
 
     CONF_PATH = os.getenv(ENV_CONF, None)
     if CONF_PATH is None:
-        sys.stderr.write(
-            "Environment 0variable %s must be set to the path of a "
-            "JSON configuration file.\n" % ENV_CONF)
-        return
+        LOG.error("Environment 0variable %s must be set to the path of a "
+                  "JSON configuration file.", ENV_CONF)
+        sys.exit(1)
+
 
     CONF_DIR = os.path.dirname(CONF_PATH)
     try:
         CONF_HANDLE = open(CONF_PATH, "r", encoding="utf-8")
     except IOError as e:
-        sys.stderr.write("Could not open configuration file %s.\n" % CONF_PATH)
-        sys.stderr.write(str(e) + "\n")
+        LOG.error("Could not open configuration file %s.", CONF_PATH)
+        LOG.error(str(e))
         sys.exit(1)
 
     try:
         CONF = json.load(CONF_HANDLE)
     except ValueError as e:
-        sys.stderr.write(
-            "configuration file %s is not valid JSON.\n" % CONF_PATH)
-        sys.stderr.write(str(e) + "\n")
+        LOG.error("configuration file %s is not valid JSON.", CONF_PATH)
+        LOG.error(str(e))
         sys.exit(1)
 
     if not CONF_PATH:
@@ -658,15 +715,14 @@ def build_tests():
         try:
             param_file = open(param_path, "r", encoding="utf-8")
         except IOError as e:
-            sys.stderr.write("Could not open parameter file %s.\n" % param_path)
-            sys.stderr.write(str(e) + "\n")
+            LOG.error("Could not open parameter file %s.", param_path)
+            LOG.error(str(e))
             sys.exit(1)
         try:
             params = json.load(param_file)
         except ValueError as e:
-            sys.stderr.write(
-                "Parameter file %s is not valid JSON.\n" % param_path)
-            sys.stderr.write(str(e) + "\n")
+            LOG.error("Parameter file %s is not valid JSON.", param_path)
+            LOG.error(str(e))
             sys.exit(1)
 
     COUNTER = 0
@@ -782,7 +838,7 @@ def parse_arguments():
     LOG.setLevel(level)
 
     if args.version:
-        sys.stdout.write("test_http %s\n" % __version__)
+        sys.stdout.write("test_http %s" % __version__)
         sys.exit(0)
 
 
