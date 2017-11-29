@@ -1,21 +1,30 @@
 SHELL := /bin/bash
-.PHONY : all package install uninstall
 
+PYTHON = python3
 NAME = test_http
 TMP = /tmp/$(name).tmp
 BIN = /usr/local/bin
 
 
-package :
+all :
+
+.PHONY : dist
+dist :
 	./setup.py sdist
 
-install :
-	./setup.py build
-	sudo ./setup.py install
+.PHONY : build
+build :
+	$(PYTHON) setup.py build
+
+install : build
+	sudo $(PYTHON) setup.py install
 	sudo cp test_http/test_http.py $(BIN)/test_http
 
+install-pip : dist
+	sudo -H $(PYTHON) -m pip install dist/$(NAME)-*.tar.gz
+
 clean :
-	sudo rm -rf AUTHORS ChangeLog build .eggs test_http.egg-info __pycache__
+	rm -rf AUTHORS ChangeLog build .eggs test_http.egg-info __pycache__ dist MANIFEST
 
 uninstall :
 	sudo rm -rf \
@@ -26,4 +35,4 @@ test :
 	HTTP_TEST_CONF=example.json ./test_http.py
 
 serve-test :
-	cd test_data && python3 -m SimpleHTTPServer 8088
+	cd test_data && $(PYTHON) -m SimpleHTTPServer 8088
