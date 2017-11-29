@@ -131,6 +131,7 @@ class Http(object):
             uri,
             headers=None,
             method=None,
+            follow=None,
             cookie=None,
             status=None,
             mime=None,
@@ -183,7 +184,7 @@ class Http(object):
             uri,
             headers=headers,
             data=data,
-            allow_redirects=False,
+            allow_redirects=follow,
             proxies=proxies,
             verify=verify,
         )
@@ -451,6 +452,7 @@ class HttpTest(unittest.TestCase, Http):
 def http_helper(url, params, params_extra=None):
     headers = params.get("headers", None)
     method = params.get("method", None)
+    follow = params.get("follow", None)
 
     status = params.get("status", None)
     mime = params.get("mime", None)
@@ -464,6 +466,7 @@ def http_helper(url, params, params_extra=None):
             url,
             headers=headers,
             method=method,
+            follow=follow,
             cookie=None,
             status=status,
             location=location,
@@ -636,6 +639,7 @@ PARAMS = {
 
     "headers": {},
     "method": {},
+    "follow": {},
 
     "status": {},
     "location": {},
