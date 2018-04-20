@@ -136,6 +136,7 @@ TESTS = None
 class Http(object):
     error_html = "/tmp/test_http_error.html"
 
+
     def http_request(
             self,
             uri,
@@ -333,12 +334,14 @@ class Http(object):
         except ValueError as e:
             self.fail("JSON decode error: %s." % str(e))
 
+
     def check_mako_ok(self, html, **_kwargs):
         if "Mako Runtime Error" in html:
             with open(self.error_html, "w") as html_file:
                 html_file.write(html)
                 html_file.close()
             self.fail("Mako template error. See '%s'." % self.error_html)
+
 
     def check_php_ok(self, html, **_kwargs):
         if ".php</b> on line <b>" in html:
@@ -347,6 +350,7 @@ class Http(object):
                 html_file.close()
             self.fail("PHP error. See '%s'." % self.error_html)
 
+
     def check_json_print(self, content, **_kwargs):
         try:
             data = json.loads(content)
@@ -354,6 +358,7 @@ class Http(object):
             self.fail("JSON decode error: %s." % str(e))
 
         pprint.pprint(data)
+
 
     def check_json_path(self, content, path, **_kwargs):
         try:
@@ -394,9 +399,11 @@ class Http(object):
 
         return cursor
 
+
     def check_json_undefined(self, content, path, **kwargs):
         kwargs["undefined"] = True
         self.check_json_path(content, path, **kwargs)
+
 
     def check_json_value(self, content, path, **kwargs):
         value = self.check_json_path(content, path, **kwargs)
@@ -411,6 +418,7 @@ class Http(object):
         if "icontains" in kwargs:
             self.assertIn(kwargs["icontains"].lower(), value.lower(), path)
 
+
     def check_json_count(self, content, path, **kwargs):
         value = len(self.check_json_path(content, path, **kwargs))
         if "equal" in kwargs:
@@ -420,15 +428,18 @@ class Http(object):
         if "lte" in kwargs:
             self.assertLessEqual(value, kwargs["lte"], path)
 
+
     def check_contains(self, content, term, **kwargs):
         if not term in content:
             self.fail("Term \"%s\" not found in content. %s" % (
                 term, kwargs["uri"]))
 
+
     def check_contains_not(self, content, term, **kwargs):
         if term in content:
             self.fail("Term \"%s\" found in content. %s" % (
                 term, kwargs["uri"]))
+
 
     def check_html_title(self, tree, value, **_kwargs):
         title_text = None
@@ -436,10 +447,10 @@ class Http(object):
             title_text = node.text
         self.assertEqual(title_text, value)
 
+
     def check_html_xpath(self, tree, selector, values, **_kwargs):
         nodes = tree.xpath(selector)
         self.assertEqual(nodes, values, selector)
-
 
 
     # Other
@@ -457,8 +468,10 @@ class Http(object):
             cookies[name] = value
         return bool(cookies.get('s', None))
 
+
     def assert_logged_in(self, response):
         self.assertEqual(self.logged_in(response), True)
+
 
     def assert_not_logged_in(self, response):
         self.assertEqual(self.logged_in(response), False)
@@ -473,9 +486,11 @@ class HttpTest(unittest.TestCase, Http):
         self.skip_all_message = None
         Http.__init__(self)
 
+
     @classmethod
     def setUpClass(cls):
         cls.longMessage = True
+
 
     def setUp(self):
         if self.skip_all_message:
@@ -900,6 +915,7 @@ def main():
     parse_arguments()
     build_tests()
     run_tests()
+
 
 
 if __name__ == "__main__":
