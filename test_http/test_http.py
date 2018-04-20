@@ -441,11 +441,16 @@ class HttpTest(unittest.TestCase, Http):
 
     def __init__(self, *args, **kwargs):
         unittest.TestCase.__init__(self, *args, **kwargs)
+        self.skip_all_message = None
         Http.__init__(self)
 
     @classmethod
     def setUpClass(cls):
         cls.longMessage = True
+
+    def setUp(self):
+        if self.skip_all_message:
+            raise self.skipTest(self.skip_all_message)
 
 
 
@@ -462,18 +467,23 @@ def http_helper(url, params, params_extra=None):
     url = params_expand_url(params, url, params_extra=params_extra)
 
     def func(self):
-        self.http_request(
-            url,
-            headers=headers,
-            method=method,
-            follow=follow,
-            cookie=None,
-            status=status,
-            location=location,
-            mime=mime,
-            checks=checks,
-            host=params.get("host", None)
-        )
+        try:
+            self.http_request(
+                url,
+                headers=headers,
+                method=method,
+                follow=follow,
+                cookie=None,
+                status=status,
+                location=location,
+                mime=mime,
+                checks=checks,
+                host=params.get("host", None)
+            )
+        except requests.exceptions.ConnectionError:
+            self.fail("Could not connect to host.")
+            self.skip_all_message = "Host not available."
+
     return func
 
 
@@ -517,12 +527,12 @@ def setupclass_helper(params, auth=None, xsrf=None, params_extra=None):
     if auth:
         if not auth.get("type", None):
             LOG.error("Auth `type` not supplied.")
-            sys.exit()
+            sys.exit(1)
         if auth["type"] == "firma-password":
             credentials_path = auth.get("credentials", None)
             if not credentials_path:
                 LOG.error("No credentials path supplied.")
-                sys.exit()
+                sys.exit(1)
 
             credentials_path = expand_params(
                 credentials_path, params_extra)
@@ -545,11 +555,11 @@ def setupclass_helper(params, auth=None, xsrf=None, params_extra=None):
             account = auth.get("account", None)
             if not account:
                 LOG.error("No account name supplied.")
-                sys.exit()
+                sys.exit(1)
 
             if account not in credentials:
                 LOG.error("Account name %s not found in credentials.", account)
-                sys.exit()
+                sys.exit(1)
 
             account_data = credentials[account]
 
@@ -560,15 +570,15 @@ def setupclass_helper(params, auth=None, xsrf=None, params_extra=None):
 
             if not (email or user_id):
                 LOG.error("`email` or `user_id` not supplied in credentials.")
-                sys.exit()
+                sys.exit(1)
 
             if not password:
                 LOG.error("`password` not supplied in credentials.")
-                sys.exit()
+                sys.exit(1)
 
             if not onetime_secret:
                 LOG.error("`onetime_secret` not supplied in credentials.")
-                sys.exit()
+                sys.exit(1)
 
             host = params.get("host", None)
             if host == "$HOST":
@@ -577,7 +587,7 @@ def setupclass_helper(params, auth=None, xsrf=None, params_extra=None):
             url = auth.get("url", None)
             if not url:
                 LOG.error("No URL supplied.")
-                sys.exit()
+                sys.exit(1)
 
             url = params_expand_url(params, url)
 
@@ -593,7 +603,11 @@ def setupclass_helper(params, auth=None, xsrf=None, params_extra=None):
                 data["user_id"] = user_id
 
             session = requests.Session()  # Close in `teardownclass_helper`
-            r = session.get(url, data=data)
+            try:
+                r = session.get(url, data=data)
+            except requests.exceptions.ConnectionError:
+                LOG.error("Could not connect to host.")
+                sys.exit(1)
 
             if r.status_code != 200:
                 raise AuthenticationException(
@@ -603,7 +617,7 @@ def setupclass_helper(params, auth=None, xsrf=None, params_extra=None):
             session.verify = VERIFY
         else:
             LOG.error("Unknown auth type `%s`.", auth["type"])
-            sys.exit()
+            sys.exit(1)
 
     @classmethod
     def func(cls):
