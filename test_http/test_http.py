@@ -20,15 +20,25 @@ from onetimepass import get_totp
 from lxml import etree
 from pbr.version import VersionInfo
 
+
+
 _VERSION = VersionInfo('test_http').semantic_version()
 __version__ = _VERSION.release_string()
 __version_info__ = _VERSION.version_tuple()
+
+
 
 __all__ = (
     "__version__",
     "__version_info__",
     "main",
 )
+
+
+
+class PathException(Exception):
+    pass
+
 
 
 def color_log(log):
@@ -203,6 +213,7 @@ class Http(object):
             if not f_name:
                 LOG.warning("No check function found for \"%s\".", check_name)
                 continue
+            f_kwargs["uri"] = uri
             check_functions.append((f_name, f_kwargs))
 
             if mime is None:
@@ -300,6 +311,7 @@ class Http(object):
 
         "jsonPrint": "check_json_print",
 
+        "jsonUndefined": "check_json_undefined",
         "jsonValue": "check_json_value",
         "jsonCount": "check_json_count",
         "contains": "check_contains",
@@ -349,47 +361,64 @@ class Http(object):
         except ValueError as e:
             self.fail("JSON decode error: %s." % str(e))
 
+        undefined = _kwargs.get("undefined", None) is True
         cursor = data
         keys = path.split(".")
         if keys:
             first = keys.pop(0)
             assert not first, \
-                "path be empty or start with `.`, not %s." % repr(first)
-        for key in keys:
-            if re.match(r"[0-9]+$", key):
-                key = int(key)
-            try:
-                cursor = cursor[key]
-            except KeyError as e:
-                self.fail(
-                    "Path does not exist: `%s`. Key: %s, Cursor: `%s`." %
-                    (path, repr(key), cursor))
+                "path must be empty or start with `.`, not %s." % repr(first)
+
+        try:
+            for key in keys:
+                if re.match(r"[0-9]+$", key):
+                    key = int(key)
+                try:
+                    cursor = cursor[key]
+                except KeyError as e:
+                    raise PathException(
+                        "Path does not exist. "
+                        "URI `%s`, Path `%s`. Key: %s, Cursor: `%s`." %
+                        (_kwargs["uri"], path, repr(key), cursor))
+        except PathException as e:
+            if undefined:
+                return None
+            else:
+                self.fail(str(e))
+
+        if undefined:
+            self.fail("Path should not exist. URI `%s`, Path `%s`." %
+                      (_kwargs["uri"], path))
 
         LOG.debug("JSON path: \"%s\"; value: \"%s\".", path, cursor)
 
         return cursor
 
+    def check_json_undefined(self, content, path, **kwargs):
+        kwargs["undefined"] = True
+        self.check_json_path(content, path, **kwargs)
+
     def check_json_value(self, content, path, **kwargs):
-        value = self.check_json_path(content, path)
+        value = self.check_json_path(content, path, **kwargs)
         if "equal" in kwargs:
-            self.assertEqual(value, kwargs["equal"])
+            self.assertEqual(value, kwargs["equal"], path)
         if "gte" in kwargs:
-            self.assertGreaterEqual(value, kwargs["gte"])
+            self.assertGreaterEqual(value, kwargs["gte"], path)
         if "lte" in kwargs:
-            self.assertLessEqual(value, kwargs["lte"])
+            self.assertLessEqual(value, kwargs["lte"], path)
         if "contains" in kwargs:
-            self.assertIn(kwargs["contains"], value)
+            self.assertIn(kwargs["contains"], value, path)
         if "icontains" in kwargs:
-            self.assertIn(kwargs["icontains"].lower(), value.lower())
+            self.assertIn(kwargs["icontains"].lower(), value.lower(), path)
 
     def check_json_count(self, content, path, **kwargs):
-        value = len(self.check_json_path(content, path))
+        value = len(self.check_json_path(content, path, **kwargs))
         if "equal" in kwargs:
-            self.assertEqual(value, kwargs["equal"])
+            self.assertEqual(value, kwargs["equal"], path)
         if "gte" in kwargs:
-            self.assertGreaterEqual(value, kwargs["gte"])
+            self.assertGreaterEqual(value, kwargs["gte"], path)
         if "lte" in kwargs:
-            self.assertLessEqual(value, kwargs["lte"])
+            self.assertLessEqual(value, kwargs["lte"], path)
 
     def check_contains(self, content, term, **kwargs):
         if not term in content:
