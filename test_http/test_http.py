@@ -407,20 +407,29 @@ class Http(object):
 
     def check_json_value(self, content, path, **kwargs):
         value = self.check_json_path(content, path, **kwargs)
-        if "equal" in kwargs:
-            self.assertEqual(value, kwargs["equal"], path)
-        if "gte" in kwargs:
-            self.assertGreaterEqual(value, kwargs["gte"], path)
-        if "lte" in kwargs:
-            self.assertLessEqual(value, kwargs["lte"], path)
-        if "contains" in kwargs:
-            self.assertIn(kwargs["contains"], value, path)
-        if "icontains" in kwargs:
-            self.assertIn(kwargs["icontains"].lower(), value.lower(), path)
+        try:
+            if "equal" in kwargs:
+                self.assertEqual(value, kwargs["equal"], path)
+            if "gte" in kwargs:
+                self.assertGreaterEqual(value, kwargs["gte"], path)
+            if "lte" in kwargs:
+                self.assertLessEqual(value, kwargs["lte"], path)
+            if "contains" in kwargs:
+                self.assertIn(kwargs["contains"], value, path)
+            if "icontains" in kwargs:
+                self.assertIn(kwargs["icontains"].lower(), value.lower(), path)
+        except TypeError:
+            self.fail("Value type does not match comparison. URI `%s`, Path `%s`." %
+                      (kwargs["uri"], path))
+
 
 
     def check_json_count(self, content, path, **kwargs):
-        value = len(self.check_json_path(content, path, **kwargs))
+        try:
+            value = len(self.check_json_path(content, path, **kwargs))
+        except TypeError:
+            self.fail("Value type cannot be counted. URI `%s`, Path `%s`." %
+                      (kwargs["uri"], path))
         if "equal" in kwargs:
             self.assertEqual(value, kwargs["equal"], path)
         if "gte" in kwargs:
