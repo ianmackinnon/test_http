@@ -240,9 +240,9 @@ class Http(object):
 
         message = "%s" % uri
         if 300 <= response.status_code <= 399:
-            location = response.headers.get("Location", None)
-            if location:
-                message = "%s -> %s" % (uri, location)
+            response_location = response.headers.get("Location", None)
+            if response_location:
+                message = "%s -> %s" % (uri, response_location)
 
         self.assertEqual(response.status_code, status, message)
 
