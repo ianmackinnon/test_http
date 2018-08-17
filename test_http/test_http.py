@@ -281,7 +281,7 @@ class Http(object):
             LOG.warning(repr(response.headers))
             LOG.warning(
                 "Required header missing: `content-length`. "
-                "Content length %d.", received_length)
+                "Content length.")
 
         content = response.text
         tree = None
